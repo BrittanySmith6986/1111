@@ -1,803 +1,428 @@
-/* ========================================
-   邮箱系统 - JavaScript
-   极简主义交互设计
-======================================== */
+(function() {
+    // 全局变量
+    let mailData = [];
+    let currentMailPage = 1;
+    const mailItemsPerPage = 10;
+    let currentPage = 1;
+    let itemsPerPage = 5;
+    let selectedItems = [];
+    let allEmailData = [];
+    let currentSearchKeyword = '';
+    let filteredEmailData = [];
 
-;(function () {
-  'use strict'
+    // 移动端侧边栏
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    function openSidebar() { sidebar.classList.add('open'); sidebarOverlay.classList.add('active'); }
+    function closeSidebar() { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); }
+    mobileMenuToggle.addEventListener('click', openSidebar);
+    sidebarOverlay.addEventListener('click', closeSidebar);
+    document.querySelectorAll('.sidebar ul li a').forEach(link => {
+        link.addEventListener('click', () => { if (window.innerWidth <= 1024) closeSidebar(); });
+    });
 
-  const CONFIG = {
-    STORAGE_KEY: 'emailData',
-    PASSWORD_KEY: 'password',
-    MAIL_ITEMS_PER_PAGE: 10,
-    DEFAULT_ITEMS_PER_PAGE: 10,
-    API_BASE: '/api/mail-all',
-    AI_API: '/api/ai',
-    REFRESH_TOKEN_API: '/api/refresh-token'
-  }
+    function showLoading() { document.getElementById('loading-overlay').style.display = 'flex'; }
+    function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
 
-  const AUTH_ERROR_MESSAGE = '密码验证失败，请输入正确验证密码'
-  const UNAUTHORIZED_ERROR_MESSAGE = '该邮箱未被授权使用此服务，请联系管理员处理'   // 新增
+    // 侧边栏切换
+    document.querySelectorAll('.sidebar ul li a').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.querySelectorAll('.sidebar ul li a').forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            const targetId = link.getAttribute('data-target');
+            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+            document.getElementById(targetId).classList.add('active');
+        });
+    });
 
-  let aiController = null
-  let currentAiMailIndex = null
-  let currentAiEventSource = null
-
-  const state = {
-    emailData: [],
-    mailData: [],
-    currentPage: 1,
-    currentMailPage: 1,
-    itemsPerPage: CONFIG.DEFAULT_ITEMS_PER_PAGE,
-    selectedItems: [],
-    searchKeyword: ''
-  }
-
-  const $ = (sel, ctx = document) => ctx.querySelector(sel)
-  const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)]
-
-  /* ---------- Loading ---------- */
-  const showLoading = () => $('#loading-overlay').style.display = 'flex'
-  const hideLoading = () => $('#loading-overlay').style.display = 'none'
-
-  /* ---------- 模态框 ---------- */
-  const openModal = (id) => $(`#${id}`).style.display = 'flex'
-  const closeModal = (id) => $(`#${id}`).style.display = 'none'
-  const closeAllModals = () => $$('.modal-overlay').forEach(el => el.style.display = 'none')
-
-  /* ---------- localStorage ---------- */
-  const getEmailData = () => JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || []
-  const setEmailData = (data) => localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(data))
-  const getPassword = () => localStorage.getItem(CONFIG.PASSWORD_KEY) || ''
-  const setPassword = (pwd) => localStorage.setItem(CONFIG.PASSWORD_KEY, pwd)
-
-  /* ---------- 工具函数 ---------- */
-  const showToast = (message) => {
-    const toast = $('#toast')
-    if (!toast) return
-    toast.textContent = message
-    toast.style.display = 'block'
-    setTimeout(() => toast.style.display = 'none', 2000)
-  }
-
-  /* ---------- 账号列表相关 ---------- */
-  const getFilteredData = () => {
-    const data = getEmailData()
-    const indexedData = data.map((item, index) => ({ ...item, index }))
-    if (!state.searchKeyword) return indexedData
-    const kw = state.searchKeyword.toLowerCase()
-    return indexedData.filter(item =>
-      item.email.toLowerCase().includes(kw)
-    )
-  }
-
-  const renderTable = () => {
-    const tbody = $('#email-table tbody')
-    const filtered = getFilteredData()
-    const start = (state.currentPage - 1) * state.itemsPerPage
-    const end = start + state.itemsPerPage
-    const pageData = filtered.slice(start, end)
-
-    const formatRefreshToken = (token) => {
-      if (!token || token.length <= 16) return token || ''
-      return `${token.slice(0, 6)}...${token.slice(-10)}`
+    function applySearchAndRender() {
+        const keyword = currentSearchKeyword.trim().toLowerCase();
+        filteredEmailData = keyword === '' ? [...allEmailData] : allEmailData.filter(item => item.email.toLowerCase().includes(keyword));
+        currentPage = 1;
+        renderTableByData(filteredEmailData);
+        renderPaginationByData(filteredEmailData);
+        toggleNoData(filteredEmailData.length === 0);
+        updateSelectAllCheckbox();
     }
 
-    if (pageData.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty">暂无数据</td></tr>`
-      updateSelectAllState()
-      return
+    function renderTableByData(dataArray) {
+        const tbody = document.querySelector('#email-table tbody');
+        tbody.innerHTML = '';
+        const start = (currentPage - 1) * itemsPerPage;
+        const pageData = dataArray.slice(start, start + itemsPerPage);
+        pageData.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><input type="checkbox" data-email="${escapeHtml(item.email)}"></td>
+                <td>${escapeHtml(item.email)}</td>
+                <td>${escapeHtml(item.password)}</td>
+                <td>${escapeHtml(item.clientId)}</td>
+                <td class="refresh-token" title="${escapeHtml(item.refreshToken)}">${escapeHtml(item.refreshToken)}</td>
+                <td class="actions">
+                    <button class="btn btn-view" onclick="viewInboxByEmail('${escapeHtml(item.email)}')"><i class="fas fa-inbox"></i> 收件箱</button>
+                    <button class="btn btn-view" onclick="viewJunkByEmail('${escapeHtml(item.email)}')"><i class="fas fa-ban"></i> 垃圾箱</button>
+                    <button class="btn btn-delete" onclick="deleteEmailByEmail('${escapeHtml(item.email)}')"><i class="fas fa-trash-alt"></i> 删除</button>
+                </td>`;
+            tbody.appendChild(row);
+        });
+        attachCheckboxEvents();
     }
 
-    tbody.innerHTML = pageData.map((item) => {
-      return `
-        <tr data-index="${item.index}">
-          <td class="check-col">
-            <input type="checkbox" data-index="${item.index}" ${state.selectedItems.includes(String(item.index)) ? 'checked' : ''}>
-          </td>
-          <td class="text-ellipsis" title="${item.email}">${item.email}</td>
-          <td class="text-ellipsis" title="${item.clientId}">${item.clientId}</td>
-          <td class="refresh-token" title="${item.refreshToken}">${formatRefreshToken(item.refreshToken)}</td>
-          <td>
-            <div class="actions">
-              <button class="btn btn-sm" data-action="inbox">收件箱</button>
-              <button class="btn btn-sm" data-action="junk">垃圾箱</button>
-              <button class="btn btn-sm btn-danger" data-action="delete">删除</button>
-            </div>
-          </td>
-        </tr>
-      `
-    }).join('')
-
-    updateSelectAllState()
-  }
-
-  const updateSelectAllState = () => {
-    const selectAll = $('#select-all')
-    if (!selectAll) return
-
-    const filteredIndexes = getFilteredData().map(item => String(item.index))
-    const selectedCount = filteredIndexes.filter(index => state.selectedItems.includes(index)).length
-
-    selectAll.checked = filteredIndexes.length > 0 && selectedCount === filteredIndexes.length
-    selectAll.indeterminate = selectedCount > 0 && selectedCount < filteredIndexes.length
-  }
-
-  const renderPagination = () => {
-    const filtered = getFilteredData()
-    const total = filtered.length
-    const totalPages = Math.ceil(total / state.itemsPerPage)
-    const info = $('#pagination-info')
-    const btns = $('#pagination-btns')
-
-    info.textContent = `共 ${total} 条`
-
-    if (totalPages <= 1) {
-      btns.innerHTML = ''
-      return
+    function attachCheckboxEvents() {
+        document.querySelectorAll('#email-table tbody input[type="checkbox"]').forEach(cb => {
+            cb.removeEventListener('change', updateSelectedItems);
+            cb.addEventListener('change', updateSelectedItems);
+        });
+        updateSelectedItems();
     }
 
-    let html = `<button ${state.currentPage <= 1 ? 'disabled' : ''} data-page="${state.currentPage - 1}">‹</button>`
-
-    for (let i = 1; i <= totalPages; i++) {
-      html += `<button class="${i === state.currentPage ? 'active' : ''}" data-page="${i}">${i}</button>`
+    function updateSelectedItems() {
+        selectedItems = Array.from(document.querySelectorAll('#email-table tbody input[type="checkbox"]:checked')).map(cb => cb.dataset.email);
+        updateSelectAllCheckbox();
     }
 
-    html += `<button ${state.currentPage >= totalPages ? 'disabled' : ''} data-page="${state.currentPage + 1}">›</button>`
-
-    btns.innerHTML = html
-  }
-
-  const render = () => {
-    renderTable()
-    renderPagination()
-  }
-
-  /* ---------- 账号操作 ---------- */
-  const deleteEmail = (index) => {
-    const data = getEmailData()
-    data.splice(index, 1)
-    setEmailData(data)
-    state.emailData = data
-    state.selectedItems = []
-    render()
-  }
-
-  const batchDelete = () => {
-    if (state.selectedItems.length === 0) {
-      showToast('请先选择要删除的账号')
-      return
+    function updateSelectAllCheckbox() {
+        const selectAll = document.getElementById('select-all');
+        if (!selectAll) return;
+        const total = document.querySelectorAll('#email-table tbody input[type="checkbox"]').length;
+        const checked = document.querySelectorAll('#email-table tbody input[type="checkbox"]:checked').length;
+        selectAll.checked = total > 0 && checked === total;
+        selectAll.indeterminate = checked > 0 && checked < total;
     }
 
-    $('#delete-confirm-count').textContent = state.selectedItems.length
-    openModal('delete-confirm-modal')
-  }
+    document.getElementById('select-all').addEventListener('change', function() {
+        document.querySelectorAll('#email-table tbody input[type="checkbox"]').forEach(cb => cb.checked = this.checked);
+        updateSelectedItems();
+    });
 
-  const executeBatchDelete = () => {
-    const selectedIndexes = new Set(state.selectedItems.map(Number))
-    const data = getEmailData().filter((item, index) => !selectedIndexes.has(index))
-    setEmailData(data)
-    state.emailData = data
-    state.selectedItems = []
-    closeModal('delete-confirm-modal')
-    render()
-    showToast('删除成功')
-  }
-
-  const refreshMicrosoftToken = async (mail) => {
-    const tokenResponse = await fetch(CONFIG.REFRESH_TOKEN_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: mail.clientId,
-        refresh_token: mail.refreshToken,
-        password: getPassword()
-      })
-    })
-
-    if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json().catch(() => ({}))
-      const error = new Error(errorData.error || `请求失败: ${tokenResponse.status}`)
-      error.status = tokenResponse.status
-      throw error
-    }
-
-    const data = await tokenResponse.json()
-    return data.refresh_token || mail.refreshToken
-  }
-
-  const batchRefreshTokens = async () => {
-    if (state.selectedItems.length === 0) {
-      showToast('请先选择要刷新 Token 的账号')
-      return
-    }
-
-    $('#refresh-token-count').textContent = state.selectedItems.length
-    openModal('refresh-token-modal')
-  }
-
-  const executeBatchRefreshTokens = async () => {
-    if (state.selectedItems.length === 0) {
-      closeModal('refresh-token-modal')
-      showToast('请先选择要刷新 Token 的账号')
-      return
-    }
-
-    closeModal('refresh-token-modal')
-    showLoading()
-    const data = getEmailData()
-    let successCount = 0
-    let failCount = 0
-    let authFailed = false
-
-    const selectedIndexes = new Set(state.selectedItems.map(Number))
-
-    for (const [index, item] of data.entries()) {
-      if (!selectedIndexes.has(index)) continue
-
-      try {
-        item.refreshToken = await refreshMicrosoftToken(item)
-        successCount++
-      } catch (err) {
-        if (err.status === 401) {
-          authFailed = true
-          break
+    function renderPaginationByData(dataArray) {
+        const pagination = document.getElementById('pagination');
+        pagination.innerHTML = '';
+        const totalPages = Math.ceil(dataArray.length / itemsPerPage);
+        if (totalPages === 0) return;
+        const maxButtons = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+        if (endPage - startPage + 1 < maxButtons) startPage = Math.max(1, endPage - maxButtons + 1);
+        if (currentPage > 1) {
+            const prev = document.createElement('button'); prev.textContent = '上一页';
+            prev.onclick = () => { currentPage--; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+            pagination.appendChild(prev);
         }
-        failCount++
-        console.error(`刷新 ${item.email} Token 失败:`, err)
-      }
-    }
-
-    setEmailData(data)
-    state.emailData = data
-    render()
-    hideLoading()
-
-    if (authFailed) {
-      showToast(AUTH_ERROR_MESSAGE)
-    } else if (failCount > 0) {
-      showToast(`刷新完成，成功 ${successCount} 个，失败 ${failCount} 个`)
-    } else {
-      showToast(`刷新成功，共 ${successCount} 个`)
-    }
-  }
-
-  /* ---------- 导入 ---------- */
-  const importEmails = () => {
-    const delimiter = $('#import-delimiter').value.trim()
-    const fileInput = $('#import-file')
-
-    if (!delimiter) {
-      showToast('请输入分隔符')
-      return
-    }
-    if (!fileInput.files.length) {
-      showToast('请选择文件')
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const lines = e.target.result.split('\n')
-      let data = getEmailData()
-      let count = 0
-
-      lines.forEach(line => {
-        const fields = line.split(delimiter)
-        if (fields.length >= 4) {
-          const [email, password, clientId, refreshToken] = fields.map(s => s.trim())
-          if (email && password && clientId && refreshToken) {
-            data.push({ email, password, clientId, refreshToken })
-            count++
-          }
+        if (startPage > 1) {
+            const first = document.createElement('button'); first.textContent = '1';
+            first.onclick = () => { currentPage = 1; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+            pagination.appendChild(first);
+            if (startPage > 2) { const dots = document.createElement('span'); dots.textContent = '...'; pagination.appendChild(dots); }
         }
-      })
-
-      setEmailData(data)
-      state.emailData = data
-      closeModal('import-modal')
-      render()
-      showToast(`导入成功，共 ${count} 条`)
+        for (let i = startPage; i <= endPage; i++) {
+            const btn = document.createElement('button'); btn.textContent = i;
+            if (i === currentPage) btn.classList.add('active');
+            btn.onclick = () => { currentPage = i; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+            pagination.appendChild(btn);
+        }
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) { const dots = document.createElement('span'); dots.textContent = '...'; pagination.appendChild(dots); }
+            const last = document.createElement('button'); last.textContent = totalPages;
+            last.onclick = () => { currentPage = totalPages; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+            pagination.appendChild(last);
+        }
+        if (currentPage < totalPages) {
+            const next = document.createElement('button'); next.textContent = '下一页';
+            next.onclick = () => { currentPage++; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+            pagination.appendChild(next);
+        }
     }
-    reader.readAsText(fileInput.files[0])
-  }
 
-  /* ---------- 邮件列表 ---------- */
-  const loadMailList = (refreshToken, clientId, email, mailbox) => {
-    showLoading()
-    const password = getPassword()
-    const apiUrl = `${CONFIG.API_BASE}?refresh_token=${refreshToken}&client_id=${clientId}&email=${email}&mailbox=${mailbox}&response_type=json&password=${password}`
+    window.changePage = (page) => { currentPage = page; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
+    window.changeItemsPerPage = (value) => { itemsPerPage = parseInt(value, 10); currentPage = 1; renderTableByData(filteredEmailData); renderPaginationByData(filteredEmailData); };
 
-    fetch(apiUrl)
-      .then(r => {
-        if (!r.ok) {
-          if (r.status === 401) throw { status: 401 }
-          if (r.status === 403) throw { status: 403, message: UNAUTHORIZED_ERROR_MESSAGE }   // 新增
-          if (r.status === 500) {
-            return r.json().then(d => {
-              if (d.error === 'Nothing to fetch') {
-                state.mailData = []
-                showMailSection()
-                renderMailTable()
-                return Promise.resolve()
-              }
-              throw new Error(d.error || '服务器错误')
+    function toggleNoData(isEmpty) { document.getElementById('no-data').style.display = isEmpty ? 'block' : 'none'; }
+    function updateDashboard(data) { document.getElementById('account-count').textContent = data.length; }
+
+    function reloadAllData() {
+        allEmailData = JSON.parse(localStorage.getItem('emailData')) || [];
+        updateDashboard(allEmailData);
+        applySearchAndRender();
+    }
+
+    window.deleteEmailByEmail = (email) => {
+        if (!confirm(`确定要删除邮箱 ${email} 吗？`)) return;
+        allEmailData = allEmailData.filter(item => item.email !== email);
+        localStorage.setItem('emailData', JSON.stringify(allEmailData));
+        reloadAllData();
+        showModal('删除成功', `邮箱 ${email} 已删除。`);
+    };
+
+    window.viewInboxByEmail = async (email) => {
+        const item = allEmailData.find(i => i.email === email);
+        if (!item) { showModal('错误', '未找到邮箱数据'); return; }
+        currentMailPage = 1;
+        await loadMailList(item.refreshToken, item.clientId, item.email, 'INBOX');
+    };
+    window.viewJunkByEmail = async (email) => {
+        const item = allEmailData.find(i => i.email === email);
+        if (!item) { showModal('错误', '未找到邮箱数据'); return; }
+        currentMailPage = 1;
+        await loadMailList(item.refreshToken, item.clientId, item.email, 'Junk');
+    };
+
+    window.batchDelete = () => {
+        if (selectedItems.length === 0) { alert('请选择要删除的项！'); return; }
+        if (!confirm(`确定要删除选中的 ${selectedItems.length} 项吗？`)) return;
+        allEmailData = allEmailData.filter(item => !selectedItems.includes(item.email));
+        localStorage.setItem('emailData', JSON.stringify(allEmailData));
+        reloadAllData();
+        showModal('批量删除', `成功删除 ${selectedItems.length} 项。`);
+        selectedItems = [];
+    };
+
+    function loadMailList(refreshToken, clientId, email, mailbox) {
+        showLoading();
+        const password = localStorage.getItem('password') || '';
+        fetch(`/api/mail-all?refresh_token=${refreshToken}&client_id=${clientId}&email=${email}&mailbox=${mailbox}&response_type=json&password=${password}`)
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 500) return response.json().then(err => {
+                        if (err.error === "Nothing to fetch") {
+                            mailData = [];
+                            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+                            document.getElementById('mail-list').classList.add('active');
+                            renderMailTable(mailData);
+                            return;
+                        } else throw new Error('服务器内部错误');
+                    });
+                    else if (response.status === 401) throw response;
+                    else throw new Error(`请求失败，状态码：${response.status}`);
+                }
+                return response.json();
             })
-          }
-          throw new Error(`请求失败: ${r.status}`)
+            .then(data => {
+                if (data) {
+                    mailData = data;
+                    document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+                    document.getElementById('mail-list').classList.add('active');
+                    renderMailTable(mailData);
+                }
+            })
+            .catch(error => {
+                if (error.status === 401) showModal('提示', '为了防止滥用，已增加密码验证功能。如需使用，请联系管理员获取密码或自行搭建服务。');
+                else showModal('错误', error.message.includes('服务器') ? '服务器内部错误，请稍后重试。' : '该邮箱未授权，请联系管理员或在此购买。');
+            })
+            .finally(() => hideLoading());
+    }
+
+    function renderMailTable(data) {
+        const tbody = document.querySelector('#mail-table tbody');
+        tbody.innerHTML = '';
+        document.getElementById('no-data-mail').style.display = data.length === 0 ? 'block' : 'none';
+        const start = (currentMailPage - 1) * mailItemsPerPage;
+        const pageData = data.slice(start, start + mailItemsPerPage);
+        pageData.forEach((item, idx) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${escapeHtml(item.send)}</td>
+                <td>${escapeHtml(item.subject)}</td>
+                <td>${escapeHtml(item.date)}</td>
+                <td class="actions"><button class="btn btn-view" onclick="viewMail(${start + idx})"><i class="fas fa-eye"></i> 查看</button></td>`;
+            tbody.appendChild(row);
+        });
+        renderMailPagination(data.length);
+    }
+
+    function renderMailPagination(totalItems) {
+        const pagination = document.getElementById('pagination-mail');
+        pagination.innerHTML = '';
+        const totalPages = Math.ceil(totalItems / mailItemsPerPage);
+        for (let i = 1; i <= totalPages; i++) {
+            const btn = document.createElement('button'); btn.textContent = i;
+            if (i === currentMailPage) btn.classList.add('active');
+            btn.onclick = () => { currentMailPage = i; renderMailTable(mailData); };
+            pagination.appendChild(btn);
         }
-        return r.json()
-      })
-      .then(d => {
-        if (d) {
-          state.mailData = d
-          showMailSection()
-          renderMailTable()
+    }
+
+    window.changeMailPage = (page) => { currentMailPage = page; renderMailTable(mailData); };
+
+    window.viewMail = (index) => {
+        const item = mailData[index];
+        if (item) {
+            document.getElementById('mail-modal-title').textContent = item.subject;
+            document.getElementById('mail-modal-sender').textContent = `发件人: ${item.send}`;
+            document.getElementById('mail-modal-subject').textContent = `主题: ${item.subject}`;
+            document.getElementById('mail-modal-date').textContent = `日期: ${item.date}`;
+            document.getElementById('mail-modal-content').innerHTML = item.html || item.text || '(无内容)';
+            document.getElementById('mail-modal').style.display = 'flex';
         }
-      })
-      .catch(err => {
-        if (err.status === 401) {
-          showToast(AUTH_ERROR_MESSAGE)
-        } else if (err.status === 403) {                // 新增
-          showToast(UNAUTHORIZED_ERROR_MESSAGE)
-        } else {
-          showToast(err.message || '加载失败')
-        }
-      })
-      .finally(() => hideLoading())
-  }
+    };
 
-  const showMailSection = () => {
-    $$('.section').forEach(s => s.classList.remove('active'))
-    $('#mail-section').classList.add('active')
-  }
+    window.closeMailModal = () => { document.getElementById('mail-modal').style.display = 'none'; };
 
-  const showAccountSection = () => {
-    $$('.section').forEach(s => s.classList.remove('active'))
-    $('#account-section').classList.add('active')
-    state.mailData = []
-    state.currentMailPage = 1
-  }
+    window.importEmails = () => {
+        const delimiter = document.getElementById('delimiter').value.trim();
+        const fileInput = document.getElementById('file-input');
+        if (!delimiter) { showModal('错误', '请输入分隔符！'); return; }
+        if (fileInput.files.length === 0) { showModal('错误', '请选择文件！'); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const lines = e.target.result.split('\n');
+            let data = JSON.parse(localStorage.getItem('emailData')) || [];
+            let importCount = 0, skipCount = 0;
+            lines.forEach(line => {
+                const fields = line.split(delimiter);
+                if (fields.length >= 4) {
+                    const [email, password, clientId, refreshToken] = fields.map(f => f.trim());
+                    if (email && password && clientId && refreshToken) {
+                        if (!data.some(item => item.email.toLowerCase() === email.toLowerCase())) {
+                            data.push({ email, password, clientId, refreshToken });
+                            importCount++;
+                        } else skipCount++;
+                    }
+                }
+            });
+            localStorage.setItem('emailData', JSON.stringify(data));
+            document.getElementById('searchEmailInput').value = '';
+            currentSearchKeyword = '';
+            document.getElementById('clearSearchBtn').style.display = 'none';
+            reloadAllData();
+            showModal('导入成功', `成功导入 ${importCount} 条，跳过 ${skipCount} 条重复。`);
+        };
+        reader.readAsText(fileInput.files[0]);
+    };
 
-  const renderMailTable = () => {
-    const tbody = $('#mail-table tbody')
-    const total = state.mailData.length
-    const start = (state.currentMailPage - 1) * CONFIG.MAIL_ITEMS_PER_PAGE
-    const end = start + CONFIG.MAIL_ITEMS_PER_PAGE
-    const pageData = state.mailData.slice(start, end)
+    window.openPasteModal = () => { document.getElementById('paste-modal').style.display = 'flex'; };
+    window.closePasteModal = () => { document.getElementById('paste-modal').style.display = 'none'; };
 
-    if (total === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="empty">暂无邮件</td></tr>`
-      return
-    }
-
-    tbody.innerHTML = pageData.map((item, i) => `
-      <tr>
-        <td>${item.send}</td>
-        <td>${item.subject}</td>
-        <td>${item.date}</td>
-        <td><button class="btn btn-sm" data-action="view">查看</button> <button class="btn btn-sm" data-action="ai">AI 解读</button></td>
-      </tr>
-    `).join('')
-
-    renderMailPagination()
-  }
-
-  const renderMailPagination = () => {
-    const totalPages = Math.ceil(state.mailData.length / CONFIG.MAIL_ITEMS_PER_PAGE)
-    const btns = $('#mail-pagination-btns')
-
-    if (totalPages <= 1) {
-      btns.innerHTML = ''
-      return
-    }
-
-    let html = `<button ${state.currentMailPage <= 1 ? 'disabled' : ''} data-page="${state.currentMailPage - 1}">‹</button>`
-
-    for (let i = 1; i <= totalPages; i++) {
-      html += `<button class="${i === state.currentMailPage ? 'active' : ''}" data-page="${i}">${i}</button>`
-    }
-
-    html += `<button ${state.currentMailPage >= totalPages ? 'disabled' : ''} data-page="${state.currentMailPage + 1}">›</button>`
-
-    btns.innerHTML = html
-  }
-
-  const viewMailDetail = (index) => {
-    const item = state.mailData[index]
-    if (!item) return
-
-    $('#mail-modal-title').textContent = item.subject
-    $('#mail-modal-sender').textContent = item.send
-    $('#mail-modal-date').textContent = item.date
-    $('#mail-modal-content').innerHTML = item.html || `<pre>${item.text || ''}</pre>`
-    openModal('mail-modal')
-  }
-
-  /* ---------- AI 解读 ---------- */
-  const escapeHtml = (value) => {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;')
-  }
-
-  const setAiStatus = (message) => {
-    const status = $('#ai-status')
-    if (status) {
-      status.textContent = message
-      status.classList.remove('thinking')
-    }
-  }
-
-  const setAiThinking = (message) => {
-    const status = $('#ai-status')
-    if (status) {
-      status.textContent = message
-      status.classList.add('thinking')
-    }
-  }
-
-  const appendAiThinking = (content) => {
-    const thinking = $('#ai-thinking')
-    if (!thinking || !content) return
-    thinking.classList.add('active')
-    thinking.textContent += content
-    thinking.scrollTop = thinking.scrollHeight
-  }
-
-  let aiAccumulatedContent = ''
-
-  const setAiSummary = (content, append = false) => {
-    const summary = $('#ai-summary')
-    if (!summary) return
-
-    if (append) {
-      aiAccumulatedContent += content
-      summary.textContent = aiAccumulatedContent
-    } else {
-      aiAccumulatedContent = content
-      summary.textContent = content
-      summary.innerHTML = marked.parse(aiAccumulatedContent)
-    }
-    summary.scrollTop = summary.scrollHeight
-  }
-
-  const fillAiDetails = (result) => {
-    const ai = result.ai || {}
-
-    $('#ai-type').textContent = escapeHtml(ai.mail_type || '未知')
-    $('#ai-platform').textContent = escapeHtml(ai.platform || '未知')
-    $('#ai-code').textContent = escapeHtml(ai.code || '未识别到验证码')
-    $('#ai-risk').textContent = escapeHtml(ai.risk_level || '未知')
-    $('#ai-suggestion').textContent = escapeHtml(ai.suggestion || '暂无建议')
-
-    const summary = $('#ai-summary')
-    if (summary) {
-      summary.classList.remove('ai-cursor')
-    }
-
-    const details = $('#ai-details')
-    if (details) {
-      details.classList.add('ready')
-    }
-  }
-
-  const analyzeMailWithAI = async (index) => {
-    if (currentAiEventSource) {
-      currentAiEventSource.close()
-    }
-
-    const item = state.mailData[index]
-    if (!item) return
-
-    currentAiMailIndex = index
-    openModal('ai-modal')
-
-    // 重置 AI 解读卡片状态
-    setAiStatus('正在连接 AI 解读服务...')
-    const thinking = $('#ai-thinking')
-    if (thinking) {
-      thinking.classList.remove('active')
-      thinking.textContent = ''
-    }
-    setAiSummary('准备生成摘要...')
-    const details = $('#ai-details')
-    if (details) details.classList.remove('ready')
-
-    if (aiController) {
-      aiController.abort()
-    }
-    aiController = new AbortController()
-
-    const prompt = `请分析以下邮件内容，提取关键信息并用中文总结：
-
-发件人：${item.send}
-主题：${item.subject}
-日期：${item.date}
-内容：
-${item.text || item.html || '(无内容)'}
-
-请分析：
-1. 邮件类型（验证码、营销、通知等）
-2. 关键信息提取
-3. 是否需要回复或处理`
-
-    try {
-      const response = await fetch(CONFIG.AI_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], password: getPassword() }),
-        signal: aiController.signal
-      })
-
-      if (!response.ok) {
-        const err = await response.json()
-        if (response.status === 401) throw new Error(AUTH_ERROR_MESSAGE)
-        throw new Error(err.error || `请求失败: ${response.status}`)
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let accumulatedSummary = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-
-        const lines = buffer.split('\n')
-        buffer = lines.pop()
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            const eventName = line.slice(7).trim()
-            continue
-          }
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(data)
-              const delta = parsed.choices?.[0]?.delta
-
-              if (delta?.reasoning) {
-                setAiThinking('AI 正在思考...')
-                appendAiThinking(delta.reasoning)
-              }
-
-              if (delta?.content) {
-                setAiSummary(delta.content, true)
-              }
-            } catch (e) {
-              // 忽略解析错误
+    window.importFromPaste = () => {
+        const text = document.getElementById('paste-textarea').value.trim();
+        const delimiter = document.getElementById('paste-delimiter').value.trim();
+        if (!text) { showModal('错误', '请粘贴数据！'); return; }
+        if (!delimiter) { showModal('错误', '请输入分隔符！'); return; }
+        const lines = text.split('\n');
+        let data = JSON.parse(localStorage.getItem('emailData')) || [];
+        let importCount = 0, skipCount = 0;
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const fields = line.split(delimiter);
+            if (fields.length >= 4) {
+                const [email, password, clientId, refreshToken] = fields.map(f => f.trim());
+                if (email && password && clientId && refreshToken) {
+                    if (!data.some(item => item.email.toLowerCase() === email.toLowerCase())) {
+                        data.push({ email, password, clientId, refreshToken });
+                        importCount++;
+                    } else skipCount++;
+                }
             }
-          }
+        });
+        if (importCount > 0) {
+            localStorage.setItem('emailData', JSON.stringify(data));
+            document.getElementById('searchEmailInput').value = '';
+            currentSearchKeyword = '';
+            document.getElementById('clearSearchBtn').style.display = 'none';
+            reloadAllData();
+            showModal('导入成功', `成功导入 ${importCount} 条，跳过 ${skipCount} 条重复。`);
+        } else {
+            showModal('提示', skipCount ? '所有邮箱均已存在，未导入新数据。' : '未能解析有效数据，请检查格式和分隔符。');
         }
-      }
+        closePasteModal();
+    };
 
-      setAiStatus('解读完成')
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        setAiSummary('已停止')
-      } else {
-        setAiSummary(`错误: ${err.message}`)
-      }
-    } finally {
-      if (currentAiEventSource) {
-        currentAiEventSource.close()
-        currentAiEventSource = null
-      }
+    window.exportData = () => {
+        if (allEmailData.length === 0) { showModal('提示', '当前没有可以导出的数据。'); return; }
+        const delimiter = document.getElementById('delimiter').value.trim() || '----';
+        const lines = allEmailData.map(item => [item.email, item.password, item.clientId, item.refreshToken].join(delimiter));
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `邮箱数据_${new Date().toISOString().slice(0,10)}.txt`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showModal('导出成功', `已导出 ${allEmailData.length} 条邮箱数据。`);
+    };
+
+    // 拖拽上传
+    const uploadBox = document.getElementById('upload-box');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    uploadBox.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) fileInfo.textContent = `已选择文件：${fileInput.files[0].name}`; });
+    uploadBox.addEventListener('dragover', e => { e.preventDefault(); uploadBox.classList.add('dragover'); });
+    uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
+    uploadBox.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadBox.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            fileInfo.textContent = `已选择文件：${e.dataTransfer.files[0].name}`;
+        }
+    });
+
+    // 通用模态框
+    const modal = document.getElementById('modal');
+    window.showModal = (title, message) => {
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-message').innerHTML = message;
+        modal.style.display = 'flex';
+    };
+    window.closeModal = () => { modal.style.display = 'none'; };
+
+    // 欢迎弹窗
+    const welcomeModal = document.getElementById('welcome-modal');
+    window.showWelcomeModal = () => { if (welcomeModal) welcomeModal.style.display = 'flex'; };
+    window.closeWelcomeModal = () => { if (welcomeModal) welcomeModal.style.display = 'none'; };
+    if (welcomeModal) {
+        welcomeModal.addEventListener('click', function(e) {
+            if (e.target === welcomeModal) closeWelcomeModal();
+        });
     }
-  }
 
-  const stopAiAnalysis = () => {
-    if (aiController) {
-      aiController.abort()
-      aiController = null
+    // 邮件详情弹窗遮罩关闭
+    const mailModalEl = document.getElementById('mail-modal');
+    if (mailModalEl) {
+        mailModalEl.addEventListener('click', function(e) {
+            if (e.target === mailModalEl) {
+                closeMailModal();
+            }
+        });
     }
-    if (currentAiEventSource) {
-      currentAiEventSource.close()
-      currentAiEventSource = null
-    }
-  }
 
-  /* ---------- 文件上传拖拽 ---------- */
-  const initUpload = () => {
-    const box = $('#upload-box')
-    const input = $('#import-file')
-    const info = $('#file-info')
+    // ESC 关闭顺序
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            if (welcomeModal && welcomeModal.style.display === 'flex') { closeWelcomeModal(); return; }
+            if (mailModalEl && mailModalEl.style.display === 'flex') { closeMailModal(); return; }
+            const pasteModal = document.getElementById('paste-modal');
+            if (pasteModal && pasteModal.style.display === 'flex') { closePasteModal(); return; }
+            if (modal && modal.style.display === 'flex') { closeModal(); return; }
+        }
+    });
 
-    box.addEventListener('click', () => input.click())
+    window.setPassword = () => { localStorage.setItem('password', document.getElementById('password').value.trim()); };
 
-    input.addEventListener('change', () => {
-      if (input.files[0]) {
-        info.textContent = input.files[0].name
-      }
-    })
-
-    box.addEventListener('dragover', e => {
-      e.preventDefault()
-      box.classList.add('dragover')
-    })
-
-    box.addEventListener('dragleave', () => {
-      box.classList.remove('dragover')
-    })
-
-    box.addEventListener('drop', e => {
-      e.preventDefault()
-      box.classList.remove('dragover')
-      if (e.dataTransfer.files[0]) {
-        input.files = e.dataTransfer.files
-        info.textContent = e.dataTransfer.files[0].name
-      }
-    })
-  }
-
-  /* ---------- 事件绑定 ---------- */
-  const bindEvents = () => {
     // 搜索
-    $('#search-input').addEventListener('input', e => {
-      state.searchKeyword = e.target.value.trim()
-      state.currentPage = 1
-      render()
-    })
+    const searchInput = document.getElementById('searchEmailInput');
+    const clearBtn = document.getElementById('clearSearchBtn');
+    searchInput.addEventListener('input', (e) => {
+        currentSearchKeyword = e.target.value;
+        clearBtn.style.display = currentSearchKeyword ? 'flex' : 'none';
+        applySearchAndRender();
+    });
+    clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        currentSearchKeyword = '';
+        clearBtn.style.display = 'none';
+        applySearchAndRender();
+    });
 
-    // 工具栏按钮
-    $('#toolbar').addEventListener('click', e => {
-      const action = e.target.dataset.action
-      if (!action) return
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m])
+                  .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, c => c);
+    }
 
-      switch (action) {
-        case 'import':
-          openModal('import-modal')
-          break
-        case 'refresh-token':
-          batchRefreshTokens()
-          break
-        case 'delete':
-          batchDelete()
-          break
-      }
-    })
-
-    // 账号表格操作
-    $('#email-table tbody').addEventListener('click', e => {
-      const btn = e.target.closest('button[data-action]')
-      if (!btn) return
-
-      const action = btn.dataset.action
-      const tr = btn.closest('tr')
-      const index = parseInt(tr.dataset.index, 10)
-
-      switch (action) {
-        case 'inbox':
-          loadMailList(state.emailData[index].refreshToken, state.emailData[index].clientId, state.emailData[index].email, 'INBOX')
-          break
-        case 'junk':
-          loadMailList(state.emailData[index].refreshToken, state.emailData[index].clientId, state.emailData[index].email, 'Junk')
-          break
-        case 'delete':
-          deleteEmail(index)
-          break
-      }
-    })
-
-    // 全选
-    $('#select-all').addEventListener('change', e => {
-      const filteredIndexes = getFilteredData().map(item => String(item.index))
-
-      if (e.target.checked) {
-        state.selectedItems = [...new Set([...state.selectedItems, ...filteredIndexes])]
-      } else {
-        state.selectedItems = state.selectedItems.filter(index => !filteredIndexes.includes(index))
-      }
-
-      render()
-    })
-
-    // 单选
-    $('#email-table tbody').addEventListener('change', e => {
-      if (e.target.type !== 'checkbox') return
-
-      if (e.target.checked) {
-        state.selectedItems = [...new Set([...state.selectedItems, e.target.dataset.index])]
-      } else {
-        state.selectedItems = state.selectedItems.filter(index => index !== e.target.dataset.index)
-      }
-
-      updateSelectAllState()
-    })
-
-    // 分页点击
-    $('#pagination-btns').addEventListener('click', e => {
-      const btn = e.target.closest('button[data-page]')
-      if (btn && !btn.disabled) {
-        state.currentPage = parseInt(btn.dataset.page, 10)
-        render()
-      }
-    })
-
-    // 每页条数
-    $('#per-page').addEventListener('change', e => {
-      state.itemsPerPage = parseInt(e.target.value, 10)
-      state.currentPage = 1
-      render()
-    })
-
-    // 邮件表格操作
-    $('#mail-table tbody').addEventListener('click', e => {
-      const btn = e.target.closest('button[data-action]')
-      if (!btn) return
-
-      const tr = btn.closest('tr')
-      const rows = [...tr.parentNode.children]
-      const index = rows.indexOf(tr)
-      const globalIndex = (state.currentMailPage - 1) * CONFIG.MAIL_ITEMS_PER_PAGE + index
-
-      if (btn.dataset.action === 'view') {
-        viewMailDetail(globalIndex)
-      } else if (btn.dataset.action === 'ai') {
-        analyzeMailWithAI(globalIndex)
-      }
-    })
-
-    // 邮件分页
-    $('#mail-pagination-btns').addEventListener('click', e => {
-      const btn = e.target.closest('button[data-page]')
-      if (btn && !btn.disabled) {
-        state.currentMailPage = parseInt(btn.dataset.page, 10)
-        renderMailTable()
-      }
-    })
-
-    // 返回按钮
-    $('#back-btn').addEventListener('click', showAccountSection)
-
-    // AI 关闭按钮
-    $('#ai-close').addEventListener('click', () => {
-      stopAiAnalysis()
-      closeModal('ai-modal')
-    })
-
-    // 刷新 Token 确认弹窗
-    $('#refresh-token-cancel').addEventListener('click', () => closeModal('refresh-token-modal'))
-    $('#refresh-token-confirm').addEventListener('click', executeBatchRefreshTokens)
-
-    // 批量删除确认弹窗
-    $('#delete-confirm-cancel').addEventListener('click', () => closeModal('delete-confirm-modal'))
-    $('#delete-confirm-submit').addEventListener('click', executeBatchDelete)
-
-    // 导入弹窗按钮
-    $('#import-confirm').addEventListener('click', importEmails)
-
-    // 关闭模态框
-    $$('.modal-overlay').forEach(overlay => {
-      overlay.addEventListener('click', e => {
-        if (e.target === overlay) closeAllModals()
-      })
-    })
-
-    // 密码保存
-    $('#toolbar-password').addEventListener('input', e => setPassword(e.target.value.trim()))
-
-    // 初始化密码值
-    const pwd = getPassword()
-    if (pwd) $('#toolbar-password').value = pwd
-  }
-
-  /* ---------- 初始化 ---------- */
-  const init = () => {
-    state.emailData = getEmailData()
-    render()
-    initUpload()
-    bindEvents()
-
-    // 暴露全局
-    
+    window.onload = () => {
+        reloadAllData();
+        showWelcomeModal();
+    };
+})();
