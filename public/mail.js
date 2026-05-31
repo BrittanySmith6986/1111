@@ -17,6 +17,7 @@
   }
 
   const AUTH_ERROR_MESSAGE = '密码验证失败，请输入正确验证密码'
+  const UNAUTHORIZED_ERROR_MESSAGE = '该邮箱未被授权使用此服务，请联系管理员处理'   // 新增
 
   let aiController = null
   let currentAiMailIndex = null
@@ -311,6 +312,7 @@
       .then(r => {
         if (!r.ok) {
           if (r.status === 401) throw { status: 401 }
+          if (r.status === 403) throw { status: 403, message: UNAUTHORIZED_ERROR_MESSAGE }   // 新增
           if (r.status === 500) {
             return r.json().then(d => {
               if (d.error === 'Nothing to fetch') {
@@ -336,6 +338,8 @@
       .catch(err => {
         if (err.status === 401) {
           showToast(AUTH_ERROR_MESSAGE)
+        } else if (err.status === 403) {                // 新增
+          showToast(UNAUTHORIZED_ERROR_MESSAGE)
         } else {
           showToast(err.message || '加载失败')
         }
@@ -796,13 +800,4 @@ ${item.text || item.html || '(无内容)'}
     bindEvents()
 
     // 暴露全局
-    window.mailApp = {
-      closeModal: closeAllModals
-    }
-
-    console.log('%c感谢您使用本项目！', 'color: #666; font-size: 11px;')
-    console.log('%c作者: HChaohui  开源地址: https://github.com/HChaoHui/msOauth2api', 'color: #007BFF; font-size: 12px;')
-  }
-
-  document.addEventListener('DOMContentLoaded', init)
-})()
+    
