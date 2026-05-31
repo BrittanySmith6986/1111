@@ -1,4 +1,5 @@
 const Imap = require('node-imap');
+const { isEmailAuthorized } = require('../lib/auth');   // 新增
 
 module.exports = async (req, res) => {
 
@@ -8,17 +9,19 @@ module.exports = async (req, res) => {
 
     if (password !== expectedPassword) {
         return res.status(401).json({
-            error: '密码验证失败'
+            error: 'Authentication failed. Please provide valid credentials or contact administrator for access. Refer to API documentation for deployment details.'
         });
     }
     
-    // 根据请求方法从 query 或 body 中获取参数
     const params = req.method === 'GET' ? req.query : req.body;
     const { refresh_token, client_id, email } = params;
 
-    // 检查是否缺少必要的参数
     if (!refresh_token || !client_id || !email) {
         return res.status(400).json({ error: 'Missing required parameters: refresh_token, client_id, or email' });
+    }
+
+    if (!(await isEmailAuthorized(email))) {               // 替换
+        return res.status(403).json({ error: 'Forbidden: This email is not authorized to use this service.' });
     }
 
     async function get_access_token() {
