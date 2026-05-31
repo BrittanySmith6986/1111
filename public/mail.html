@@ -1,214 +1,182 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>邮箱系统</title>
-  <link rel="stylesheet" href="/mail.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.2.0/marked.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邮箱系统 · 管理中心</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="mail.css">
 </head>
 <body>
 
-  <div class="loading-overlay" id="loading-overlay">
-    <div class="spinner"></div>
-  </div>
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle"><i class="fas fa-bars"></i></button>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-  <div id="toast" class="toast"></div>
+    <div class="loading-overlay" id="loading-overlay"><div class="loading-spinner"></div></div>
 
-  <div class="container">
-    <header class="header">
-      <h1>邮箱系统</h1>
-    </header>
-
-    <main class="main">
-      <!-- 账号列表区域 -->
-      <div id="account-section" class="section active">
-        <div class="toolbar" id="toolbar">
-          <label class="toolbar-field">
-            <span>搜索账号</span>
-            <input type="text" class="search-input" id="search-input" placeholder="输入邮箱地址">
-          </label>
-          <label class="toolbar-field">
-            <span>接口密码</span>
-            <input type="password" class="password-input" id="toolbar-password" placeholder="访问密码" title="用于访问受保护的 API 接口">
-          </label>
-          <div class="toolbar-actions">
-            <button class="btn btn-primary" data-action="import" title="从 txt 文件导入邮箱账号">+ 导入账号文件</button>
-            <button class="btn" data-action="refresh-token" title="刷新已勾选账号的 Refresh Token">刷新选中 Token</button>
-            <button class="btn btn-danger" data-action="delete" title="删除已勾选账号">删除选中账号</button>
-          </div>
+    <!-- 侧边栏 -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="logo-icon"><i class="fas fa-envelope"></i></div>
+                <span class="logo-text">邮箱系统</span>
+            </div>
         </div>
-
-        <div class="table-wrap">
-          <table class="table" id="email-table">
-            <thead>
-              <tr>
-                <th class="check-col"><input type="checkbox" id="select-all"></th>
-                <th>账号</th>
-                <th>Client ID</th>
-                <th>Refresh Token</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <nav class="sidebar-nav">
+            <ul>
+                <li><a href="#" data-target="dashboard" class="active"><i class="fas fa-tachometer-alt"></i>仪表盘</a></li>
+                <li><a href="#" data-target="emails"><i class="fas fa-envelope"></i>邮箱管理</a></li>
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <span>By <a href="https://buy.jiyuanfaka.com/links/947DD800?dev=1&theme_id=9" target="_blank">Kk社区</a></span>
         </div>
-
-        <div class="pagination-wrap">
-          <span class="pagination-info" id="pagination-info">共 0 条</span>
-          <div class="pagination" id="pagination-btns"></div>
-          <select class="per-page" id="per-page">
-            <option value="10">10 条/页</option>
-            <option value="20">20 条/页</option>
-            <option value="50">50 条/页</option>
-            <option value="100">100 条/页</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 邮件列表区域 -->
-      <div id="mail-section" class="section">
-        <div class="mail-section">
-          <h2>
-            <button class="back-btn" id="back-btn">← 返回</button>
-            邮件列表
-          </h2>
-
-          <div class="table-wrap">
-            <table class="table" id="mail-table">
-              <thead>
-                <tr>
-                  <th>发件人</th>
-                  <th>主题</th>
-                  <th>日期</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-
-          <div class="pagination-wrap">
-            <div class="pagination" id="mail-pagination-btns"></div>
-          </div>
-        </div>
-      </div>
-    </main>
-
-    <footer class="footer">
-      Powered by <a href="https://github.com/HChaoHui/msOauth2api" target="_blank" rel="noopener noreferrer">MS OAuth2API</a>
-    </footer>
-  </div>
-
-  <!-- 导入弹窗 -->
-  <div class="modal-overlay import-modal" id="import-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>导入账号</h3>
-      </div>
-      <div class="modal-body">
-        <!-- 导入方式切换 -->
-        <div class="form-group">
-          <label>导入方式</label>
-          <div class="import-tabs">
-            <button class="btn btn-sm import-tab active" data-import-type="file">文件导入</button>
-            <button class="btn btn-sm import-tab" data-import-type="paste">粘贴导入</button>
-          </div>
-        </div>
-        <!-- 文件上传区域 -->
-        <div class="upload-box" id="upload-box">
-          <p>点击或拖拽文件到此处上传</p>
-          <p id="file-info"></p>
-          <input type="file" id="import-file" accept=".txt">
-        </div>
-        <!-- 粘贴导入区域 -->
-        <div class="paste-area" id="paste-area" style="display:none;">
-          <textarea id="paste-content" placeholder="请粘贴账号数据，每行一条，格式：邮箱----密码----ClientId----RefreshToken" rows="10"></textarea>
-        </div>
-        <div class="form-group">
-          <label>分隔符</label>
-          <input type="text" id="import-delimiter" value="----" placeholder="分隔符">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="mailApp.closeModal()">取消</button>
-        <button class="btn btn-primary" id="import-confirm">导入</button>
-      </div>
     </div>
-  </div>
 
-  <!-- 刷新 Token 确认弹窗 -->
-  <div class="modal-overlay" id="refresh-token-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>确认刷新 Token</h3>
-      </div>
-      <div class="modal-body">
-        <p>确定刷新选中的 <strong id="refresh-token-count">0</strong> 个账号 Token？</p>
-        <p>刷新成功后会覆盖本地保存的 Refresh Token。</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="refresh-token-cancel">取消</button>
-        <button class="btn btn-primary" id="refresh-token-confirm">确认刷新</button>
-      </div>
-    </div>
-  </div>
+    <!-- 主内容 -->
+    <div class="main-wrapper">
+        <div class="content">
+            <div id="dashboard" class="content-section active">
+                <div class="dashboard-cards">
+                    <div class="dashboard-card">
+                        <div class="card-accent"></div>
+                        <div class="card-icon"><i class="fas fa-users"></i></div>
+                        <div class="card-label">账号数量</div>
+                        <div class="card-value" id="account-count">0</div>
+                    </div>
+                    <div class="dashboard-card" onclick="window.open('https://buy.jiyuanfaka.com/links/947DD800?dev=1&theme_id=9')" style="cursor: pointer;">
+                        <div class="card-accent"></div>
+                        <div class="card-icon"><i class="fas fa-external-link-alt"></i></div>
+                        <div class="card-label">传送门</div>
+                        <div class="card-value" style="font-size: 20px;">📬 立即购买</div>
+                    </div>
+                </div>
+            </div>
 
-  <!-- 批量删除确认弹窗 -->
-  <div class="modal-overlay" id="delete-confirm-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>确认删除账号</h3>
-      </div>
-      <div class="modal-body">
-        <p>确定删除选中的 <strong id="delete-confirm-count">0</strong> 个账号？</p>
-        <p>删除后本地保存的账号信息将无法恢复。</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="delete-confirm-cancel">取消</button>
-        <button class="btn btn-danger" id="delete-confirm-submit">确认删除</button>
-      </div>
-    </div>
-  </div>
+            <div id="emails" class="content-section">
+                <div class="section-header">
+                    <h1>📧 邮箱管理</h1>
+                    <p class="subtitle">导入与管理您的邮箱账户</p>
+                </div>
+                <div class="upload-section">
+                    <div class="upload-box" id="upload-box">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>点击或拖拽文件到此处上传</p>
+                        <div class="file-info" id="file-info"></div>
+                        <input type="file" id="file-input" accept=".txt">
+                    </div>
+                    <div class="delimiter-input">
+                        <input type="password" id="password" placeholder="输入验证密码（可选）" oninput="setPassword()">
+                        <input type="text" id="delimiter" placeholder="输入分隔符（如 ----）">
+                        <button class="action-btn btn-primary" onclick="importEmails()"><i class="fas fa-file-import"></i> 导入邮箱</button>
+                        <button class="action-btn delete-btn" onclick="batchDelete()"><i class="fas fa-trash-alt"></i> 批量删除</button>
+                    </div>
+                    <div class="email-handel" style="justify-content: flex-start; margin-top: 15px;">
+                        <button class="action-btn btn-primary" onclick="openPasteModal()" style="margin-right: 10px;"><i class="fas fa-paste"></i> 粘贴导入</button>
+                        <button class="action-btn btn-primary" onclick="exportData()"><i class="fas fa-download"></i> 导出数据</button>
+                    </div>
+                </div>
 
-  <!-- 邮件详情弹窗 -->
-  <div class="modal-overlay mail-modal" id="mail-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3 id="mail-modal-title"></h3>
-      </div>
-      <div class="modal-body">
-        <div class="mail-meta">
-          <p><strong>发件人：</strong><span id="mail-modal-sender"></span></p>
-          <p><strong>日期：</strong><span id="mail-modal-date"></span></p>
+                <div class="search-container">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchEmailInput" placeholder="搜索邮箱地址..." autocomplete="off">
+                        <button class="clear-search" id="clearSearchBtn" style="display: none;"><i class="fas fa-times-circle"></i></button>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="email-table" id="email-table">
+                        <thead><tr><th><input type="checkbox" id="select-all"></th><th>Email</th><th>Password</th><th>Client ID</th><th>Refresh Token</th><th>操作</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="no-data" id="no-data"><i class="fas fa-inbox"></i>暂无数据</div>
+                <div class="pagination-section">
+                    <div class="pagination" id="pagination"><button onclick="changePage(1)">1</button></div>
+                    <select id="items-per-page" onchange="changeItemsPerPage(this.value)">
+                        <option value="5">5 条/页</option><option value="10">10 条/页</option><option value="20">20 条/页</option>
+                        <option value="50">50 条/页</option><option value="100">100 条/页</option><option value="200">200 条/页</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="mail-list" class="content-section">
+                <div class="section-header"><h1>📬 邮件列表</h1><p class="subtitle">浏览收件箱与垃圾邮件</p></div>
+                <div class="table-wrapper">
+                    <table class="mail-table" id="mail-table">
+                        <thead><tr><th>发件人</th><th>主题</th><th>日期</th><th>操作</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="no-data" id="no-data-mail"><i class="fas fa-envelope-open"></i>暂无数据</div>
+                <div class="pagination" id="pagination-mail" style="margin-top:18px;justify-content:center;display:flex;">
+                    <button onclick="changeMailPage(1)">1</button>
+                </div>
+            </div>
         </div>
-        <div class="mail-content" id="mail-modal-content"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="mailApp.closeModal()">关闭</button>
-      </div>
     </div>
-  </div>
 
-  <!-- AI 解读弹窗 -->
-  <div class="modal-overlay ai-modal" id="ai-modal">
-    <div class="modal ai-modal-content">
-      <div class="modal-header">
-        <h3>AI 解读</h3>
-      </div>
-      <div class="modal-body">
-        <div class="ai-analysis-card">
-          <div class="ai-status" id="ai-status">正在连接 AI 解读服务...</div>
-          <div class="ai-thinking" id="ai-thinking"></div>
-          <div class="ai-summary ai-cursor" id="ai-summary">准备生成摘要...</div>
+    <!-- 欢迎弹窗 -->
+    <div class="welcome-modal" id="welcome-modal">
+        <div class="welcome-modal-content">
+            <div class="welcome-modal-header">
+                <div class="welcome-icon-wrapper"><i class="fas fa-envelope-open-text"></i></div>
+                <h2>欢迎使用邮箱管理系统</h2>
+                <p class="welcome-subtitle">高效管理 · 轻松掌控</p>
+            </div>
+            <div class="welcome-modal-body">
+                <p style="color: var(--text-secondary); font-size: 14px; line-height: 1.7; margin: 0;">一站式管理您的邮箱账户，支持批量导入、收件箱查看、垃圾邮件浏览等功能。</p>
+                <div class="welcome-features">
+                    <span class="welcome-feature-item"><i class="fas fa-file-import"></i> 批量导入</span>
+                    <span class="welcome-feature-item"><i class="fas fa-inbox"></i> 收件箱</span>
+                    <span class="welcome-feature-item"><i class="fas fa-ban"></i> 垃圾箱</span>
+                    <span class="welcome-feature-item"><i class="fas fa-download"></i> 数据导出</span>
+                </div>
+            </div>
+            <div class="welcome-modal-footer">
+                <button class="welcome-close-btn" onclick="closeWelcomeModal()"><i class="fas fa-check-circle"></i> 开始使用</button>
+                <span class="welcome-hint">按 <strong>ESC</strong> 键或点击遮罩也可关闭</span>
+                <a href="https://buy.jiyuanfaka.com/links/947DD800?dev=1&theme_id=9" target="_blank" class="welcome-link"><i class="fas fa-external-link-alt"></i> 访问 Kk社区 购买邮箱</a>
+            </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="ai-close">停止</button>
-      </div>
     </div>
-  </div>
 
-  <script src="/mail.js"></script>
+    <!-- 通用模态框 -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <h3 id="modal-title"></h3>
+            <p id="modal-message"></p>
+            <button onclick="closeModal()">关闭</button>
+        </div>
+    </div>
+
+    <!-- 粘贴导入模态框 -->
+    <div class="modal" id="paste-modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <h3>粘贴导入数据</h3>
+            <p style="font-size: 13px; color: #666; margin-bottom: 10px;">请将需要导入的数据粘贴到下方（格式：邮箱----密码----client_id----refresh_token，每行一个）</p>
+            <textarea id="paste-textarea" rows="6" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; font-family: monospace;"></textarea>
+            <div class="delimiter-input" style="justify-content: center; margin-top: 15px;">
+                <input type="text" id="paste-delimiter" placeholder="输入分隔符（如 ----）" value="----" style="width: 200px;">
+                <button onclick="importFromPaste()" style="margin-right: 10px;" class="action-btn btn-primary">确认导入</button>
+                <button onclick="closePasteModal()" class="action-btn delete-btn" style="margin-left: 0;">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 邮件详情模态框 -->
+    <div class="mail-modal" id="mail-modal">
+        <div class="mail-modal-content">
+            <h3 id="mail-modal-title"></h3>
+            <p id="mail-modal-sender"></p>
+            <p id="mail-modal-subject"></p>
+            <p id="mail-modal-date"></p>
+            <div id="mail-modal-content"></div>
+            <button onclick="closeMailModal()">关闭</button>
+        </div>
+    </div>
+
+    <script src="mail.js"></script>
 </body>
 </html>
